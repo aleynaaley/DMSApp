@@ -8,7 +8,7 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
             Color.vBackground.ignoresSafeArea()
 
-            // İçerik
+            // İçerik — tab bar yüksekliği kadar padding ekle
             Group {
                 switch store.appState {
                 case .welcome:
@@ -21,18 +21,20 @@ struct ContentView: View {
                     AnalyticsView()
                 }
             }
+            // Sadece tab bar olan ekranlarda boşluk bırak
+            .padding(.bottom, (store.appState == .welcome || store.appState == .analytics) ? 70 : 0)
 
-            // Tab bar — sadece welcome ve analytics'te göster
+            // Tab bar — sadece welcome ve analytics'te
             if store.appState == .welcome || store.appState == .analytics {
                 VStack(spacing: 0) {
                     Divider().background(Color.vBorder)
                     HStack(spacing: 0) {
-                        TabItem(icon: "eye.fill",      label: "MONITOR",
+                        TabItem(icon: "eye.fill",       label: "MONITOR",
                                 selected: selectedTab == 0) {
                             selectedTab = 0
                             store.appState = .welcome
                         }
-                        TabItem(icon: "bell.fill",     label: "ALERTS",
+                        TabItem(icon: "bell.fill",      label: "ALERTS",
                                 selected: selectedTab == 1) {
                             selectedTab = 1
                         }
@@ -44,10 +46,14 @@ struct ContentView: View {
                     }
                     .padding(.vertical, 10)
                     .background(Color.vCard)
+
+                    // iPhone home indicator alanı
+                    Color.vCard.frame(height: 0)
+                        .ignoresSafeArea(edges: .bottom)
                 }
+                .ignoresSafeArea(edges: .bottom)
             }
         }
-        .ignoresSafeArea(edges: .bottom)
     }
 }
 

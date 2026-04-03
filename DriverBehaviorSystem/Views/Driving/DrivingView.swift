@@ -36,6 +36,15 @@ struct DrivingView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 14) {
 
+                        // Kalibrasyon banner'ı
+                        if engine.isCalibrating {
+                            CalibrationBanner(
+                                phase: engine.calibPhase,
+                                progress: engine.calibProgress
+                            )
+                            .padding(.horizontal, 20)
+                        }
+
                         // Kamera
                         ZStack(alignment: .topLeading) {
                             CameraPreviewView(camera: camera)
@@ -123,23 +132,42 @@ struct DrivingView: View {
 
             // Uyarı overlay
             if engine.alertFired {
-                AlertOverlayView(decision: engine.decision) {
-                    engine.resetAlert()
-                }
+                AlertOverlayView(decision: engine.decision)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.3), value: engine.alertFired)
             }
         }
         .onAppear {
             camera.start()
-            engine.startCalibration(fps: 30,
-                                    profileId: store.currentProfile.id.uuidString)
-            // Kalibrasyon atlanmışsa direkt analiz başlat
-            // (CalibrationView'dan gelenler zaten kalibre)
-            camera.onFrame = { ear, mar, pitch, yaw, roll in
-                engine.processFrame(ear: ear, mar: mar,
-                                    pitch: pitch, yaw: yaw, roll: roll)
+
+            let profileId = store.currentProfile.id.uuidString
+
+            // Kaydedilmiş baseline varsa kalibrasyonu atla — direkt çalış
+            if let saved = engine.loadBaseline(for: profileId) {
+                engine.forceStart(baseline: saved, fps: 30)
+            } else {
+                // İlk kez — 10 saniyelik kalibrasyon yap ve kaydet
+                engine.startCalibration(fps: 30, profileId: profileId)
+            }
+
+            // Frame routing: kalibrasyon aşamasında feedCalibFrame,
+            // sonrasında processFrame'e git
+            camera.onFrame = { [weak engine] ear, mar, pitch, yaw, roll in
+                guard let engine = engine else { return }
+                if engine.isCalibrating {
+                    engine.feedCalibFrame(ear: ear, mar: mar,
+                                          pitch: pitch, yaw: yaw, roll: roll)
+                } else {
+                    engine.processFrame(ear: ear, mar: mar,
+                                        pitch: pitch, yaw: yaw, roll: roll)
+                }
             }
         }
-        .onDisappear { camera.stop() }
+        .onDisappear {
+            camera.stop()
+            // Baseline'ı kaydet — bir dahaki seferde kalibrasyon atlanır
+            engine.saveBaseline(for: store.currentProfile.id.uuidString)
+        }
         .confirmationDialog("Sürüşü bitirmek istiyor musunuz?",
                             isPresented: $showStopConfirm, titleVisibility: .visible) {
             Button("Sürüşü Bitir", role: .destructive) {
@@ -149,6 +177,40 @@ struct DrivingView: View {
             }
             Button("İptal", role: .cancel) {}
         }
+    }
+}
+
+// MARK: - Kalibrasyon Banner (DrivingView içinde gösterilir)
+struct CalibrationBanner: View {
+    let phase   : Int
+    let progress: Double
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "waveform.path.ecg")
+                    .foregroundColor(.vGreen)
+                Text(phase == 1 ? "KALİBRASYON — Düz bakın" : "KALİBRASYON — Baş hareketleri")
+                    .font(.mono(11, weight: .bold))
+                    .foregroundColor(.white)
+                Spacer()
+                Text("\(Int(progress * 100))%")
+                    .font(.mono(11, weight: .bold))
+                    .foregroundColor(.vGreen)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Color.vBorder.frame(height: 4).cornerRadius(2)
+                    Color.vGreen
+                        .frame(width: geo.size.width * progress, height: 4)
+                        .cornerRadius(2)
+                        .animation(.linear(duration: 0.3), value: progress)
+                }
+            }
+            .frame(height: 4)
+        }
+        .padding(14)
+        .cardStyle()
     }
 }
 
@@ -206,6 +268,16 @@ struct FatigueLevelBar: View {
                 Spacer()
                 Text("CRITICAL").font(.mono(9)).foregroundColor(Color(white:0.4))
             }
+
+            // Aktif sinyal nedeni
+            if !decision.reason.isEmpty {
+                Text(decision.reason)
+                    .font(.mono(10))
+                    .foregroundColor(barColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.opacity)
+                    .animation(.easeInOut, value: decision.reason)
+            }
         }
         .padding(16)
         .cardStyle()
@@ -232,6 +304,8 @@ struct MetricCard: View {
                 Text(value)
                     .font(.system(size: 28, weight: .bold))
                     .foregroundColor(valueColor)
+                    .contentTransition(.numericText())
+                    .animation(.spring(response: 0.3), value: value)
                 if !unit.isEmpty {
                     Text(unit)
                         .font(.system(size: 10))
@@ -274,6 +348,10 @@ struct TelemetryCard: View {
                    label: "Yawn Count (5min)",
                    value: "\(engine.yawnCount)")
             Divider().background(Color.vBorder)
+            TelRow(icon: "gauge.with.needle",
+                   label: "Model Score",
+                   value: String(format: "%.0f%%", engine.smoothedScore * 100))
+            Divider().background(Color.vBorder)
             TelRow(icon: "bell",
                    label: "Last Alert",
                    value: engine.microsleepTotal > 0 ? "Detected" : "None")
@@ -291,47 +369,65 @@ struct TelRow: View {
             Text(label).font(.system(size: 13)).foregroundColor(Color(white: 0.5))
             Spacer()
             Text(value).font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.3), value: value)
         }
         .padding(.vertical, 10)
     }
 }
 
-// MARK: - Alert Overlay
+// MARK: - Alert Overlay (otomatik — sürücü müdahalesi yok)
 struct AlertOverlayView: View {
     let decision : RuleDecision
-    let onDismiss: () -> Void
+    @State private var pulse = false
+
+    private var alertColor: Color {
+        decision.level == .critical ? .red : .orange
+    }
 
     var body: some View {
         ZStack {
-            Color.red.opacity(0.25).ignoresSafeArea()
-            VStack(spacing: 20) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 60))
-                    .foregroundColor(.red)
+            // Nabız gibi çakan arka plan
+            alertColor
+                .opacity(pulse ? 0.35 : 0.15)
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true),
+                           value: pulse)
+
+            VStack(spacing: 16) {
+                // İkon
+                Image(systemName: decision.level == .critical
+                      ? "exclamationmark.triangle.fill"
+                      : "moon.zzz.fill")
+                    .font(.system(size: 56))
+                    .foregroundColor(alertColor)
+                    .scaleEffect(pulse ? 1.15 : 1.0)
+                    .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true),
+                               value: pulse)
+
                 Text(decision.level.title)
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.system(size: 28, weight: .black))
                     .foregroundColor(.white)
+
                 if !decision.reason.isEmpty {
                     Text(decision.reason)
-                        .font(.system(size: 14))
-                        .foregroundColor(Color(white: 0.8))
+                        .font(.mono(12, weight: .bold))
+                        .foregroundColor(alertColor)
                         .multilineTextAlignment(.center)
                 }
-                Text("Lütfen güvenli bir yere çekip dinlenin.")
-                    .font(.system(size: 14))
+
+                Text("Lütfen güvenli bir yere çekin")
+                    .font(.system(size: 13))
                     .foregroundColor(Color(white: 0.7))
                     .multilineTextAlignment(.center)
-                Button("Anladım") { onDismiss() }
-                    .frame(width: 200, height: 48)
-                    .background(Color.red)
-                    .foregroundColor(.white)
-                    .fontWeight(.bold)
-                    .cornerRadius(12)
             }
-            .padding(30)
-            .background(Color.vCard.opacity(0.95))
-            .cornerRadius(20)
-            .padding(24)
+            .padding(32)
+            .background(Color.black.opacity(0.85))
+            .cornerRadius(24)
+            .padding(28)
         }
+        .onAppear { pulse = true }
+        // Kullanıcı interaksionu KAPATILDI — engine zaten 5s sonra kaldırıyor
+        .allowsHitTesting(false)
     }
 }

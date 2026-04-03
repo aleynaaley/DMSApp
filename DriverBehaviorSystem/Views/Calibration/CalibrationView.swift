@@ -71,7 +71,6 @@ struct CalibrationView: View {
                                 .stroke(Color.vGreen.opacity(0.5), lineWidth: 1.5)
                         )
 
-                    // Yüz hizalama göstergesi
                     VStack {
                         Spacer()
                         HStack {
@@ -127,19 +126,25 @@ struct CalibrationView: View {
 
                 Spacer()
 
-                // CTA
+                // Kalibrasyon bitti — baseline kaydet ve sürüşe geç
                 Button {
                     if engine.calibPhase == 0 {
+                        // ✅ Baseline'ı bu profile kaydet — bir daha sorulmayacak
                         engine.saveBaseline(for: store.currentProfile.id.uuidString)
                         store.appState = .driving
                     }
                 } label: {
-                    Text(engine.calibPhase == 0 ? "Start Monitoring" : "Confirm Position")
-                        .frame(maxWidth: .infinity).frame(height: 54)
-                        .background(engine.calibPhase == 0 ? Color.vGreen : Color.vBorder)
-                        .foregroundColor(engine.calibPhase == 0 ? .black : Color(white: 0.5))
-                        .fontWeight(.semibold)
-                        .cornerRadius(12)
+                    HStack(spacing: 8) {
+                        if engine.calibPhase == 0 {
+                            Image(systemName: "checkmark.circle.fill")
+                        }
+                        Text(engine.calibPhase == 0 ? "Start Monitoring" : "Calibrating...")
+                    }
+                    .frame(maxWidth: .infinity).frame(height: 54)
+                    .background(engine.calibPhase == 0 ? Color.vGreen : Color.vBorder)
+                    .foregroundColor(engine.calibPhase == 0 ? .black : Color(white: 0.5))
+                    .fontWeight(.semibold)
+                    .cornerRadius(12)
                 }
                 .disabled(engine.calibPhase != 0)
                 .padding(.horizontal, 20)

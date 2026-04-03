@@ -5,6 +5,12 @@ struct WelcomeView: View {
     @State private var showProfileSheet = false
     @State private var showAddProfile   = false
 
+    /// Bu profil için kalibrasyon daha önce yapıldı mı?
+    private var isCalibrated: Bool {
+        let key = "baseline_\(store.currentProfile.id.uuidString)"
+        return UserDefaults.standard.data(forKey: key) != nil
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -52,6 +58,20 @@ struct WelcomeView: View {
                     .font(.mono(11, weight: .medium))
                     .foregroundColor(Color(white: 0.5))
                     .padding(.top, 4)
+
+                // Kalibrasyon durumu badge
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(isCalibrated ? Color.vGreen : Color.orange)
+                        .frame(width: 6, height: 6)
+                    Text(isCalibrated ? "CALIBRATED" : "NOT CALIBRATED")
+                        .font(.mono(9, weight: .bold))
+                        .foregroundColor(isCalibrated ? Color.vGreen : Color.orange)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background((isCalibrated ? Color.vGreen : Color.orange).opacity(0.12))
+                .cornerRadius(20)
+                .padding(.top, 4)
             }
 
             Spacer()
@@ -67,13 +87,19 @@ struct WelcomeView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 24)
 
-            // Start button
+            // Ana buton — kalibre ise direkt sürüş, değilse kalibrasyon
             Button {
-                store.appState = .calibration
+                if isCalibrated {
+                    store.appState = .driving      // ✅ Kalibrasyon atla
+                } else {
+                    store.appState = .calibration  // İlk kez → kalibre et
+                }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "play.fill")
-                    Text("Continue as \(store.currentProfile.name)")
+                    Image(systemName: isCalibrated ? "play.fill" : "waveform.path.ecg")
+                    Text(isCalibrated
+                         ? "Continue as \(store.currentProfile.name)"
+                         : "Calibrate & Start")
                         .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity)
@@ -84,6 +110,18 @@ struct WelcomeView: View {
             }
             .padding(.horizontal, 20)
 
+            // Kalibre olsa bile yeniden kalibrasyon seçeneği
+            if isCalibrated {
+                Button {
+                    store.appState = .calibration
+                } label: {
+                    Text("Recalibrate")
+                        .font(.system(size: 13))
+                        .foregroundColor(Color(white: 0.4))
+                }
+                .padding(.top, 6)
+            }
+
             // Profil değiştir
             Button {
                 showProfileSheet = true
@@ -92,20 +130,18 @@ struct WelcomeView: View {
                     .font(.system(size: 14))
                     .foregroundColor(Color(white: 0.5))
             }
-            .padding(.vertical, 16)
+            .padding(.vertical, isCalibrated ? 10 : 16)
 
             // Tab bar boşluk
             Color.clear.frame(height: 60)
         }
         .background(Color.vBackground)
-        // Profil seçim sheet
         .sheet(isPresented: $showProfileSheet) {
             ProfilePickerView(showAddProfile: $showAddProfile)
                 .environmentObject(store)
                 .presentationDetents([.medium, .large])
                 .preferredColorScheme(.dark)
         }
-        // Profil ekleme sheet
         .sheet(isPresented: $showAddProfile) {
             AddProfileView()
                 .environmentObject(store)
@@ -144,7 +180,6 @@ struct ProfilePickerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Başlık
             HStack {
                 Text("PROFİL SEÇ")
                     .font(.mono(14, weight: .bold))
@@ -188,6 +223,12 @@ struct ProfileRow: View {
     let isSelected: Bool
     let onSelect  : () -> Void
 
+    /// Bu profil için kalibrasyon var mı?
+    private var hasBaseline: Bool {
+        let key = "baseline_\(profile.id.uuidString)"
+        return UserDefaults.standard.data(forKey: key) != nil
+    }
+
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
@@ -201,9 +242,15 @@ struct ProfileRow: View {
                 Text(profile.name)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white)
-                Text("Risk: \(profile.riskLevel.rawValue) • \(profile.totalSessions) sürüş")
-                    .font(.system(size: 11))
-                    .foregroundColor(Color(white: 0.5))
+                HStack(spacing: 6) {
+                    Text("Risk: \(profile.riskLevel.rawValue) • \(profile.totalSessions) sürüş")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(white: 0.5))
+                    // Kalibrasyon durumu
+                    Text(hasBaseline ? "✓ CAL" : "! CAL")
+                        .font(.mono(8, weight: .bold))
+                        .foregroundColor(hasBaseline ? .vGreen : .orange)
+                }
             }
             Spacer()
             if isSelected {

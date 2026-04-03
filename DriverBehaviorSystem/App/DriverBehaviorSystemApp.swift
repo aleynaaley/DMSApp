@@ -10,7 +10,8 @@ struct DriverBehaviorSystemApp: App {
                 .environmentObject(store)
                 .preferredColorScheme(.dark)
                 .task {
-                    await store.loadProfiles()
+                    // loadProfiles sync fonksiyon — await kaldırıldı
+                    store.loadProfiles()
                 }
         }
     }
