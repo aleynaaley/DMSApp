@@ -260,6 +260,9 @@ Graves A. & Schmidhuber J. (2005). Framewise phoneme classification with
 Ngxande M. et al. (2017). Driver drowsiness detection using behavioral measures
   and machine learning: A review of state-of-the-art techniques.
   Pattern Recognition Letters, 91, 113–121.
+  
+
+Ortega, J. D., Kose, N., Cañas, P., Chao, M.-A., Unnervik, A., Nieto, M., Otaegui, O., Salgado, L. (2020). DMD: A Large-Scale Multi-modal Driver Monitoring Dataset for Attention and Alertness Analysis. In: A. Bartoli & A. Fusiello (eds), Computer Vision — ECCV 2020 Workshops (pg. 387–405). Springer International Publishing.
 ```
 
 ---
@@ -535,6 +538,9 @@ Graves A. & Schmidhuber J. (2005). Framewise phoneme classification with
 Ngxande M. et al. (2017). Driver drowsiness detection using behavioral measures
   and machine learning: A review of state-of-the-art techniques.
   Pattern Recognition Letters, 91, 113–121.
+  
+
+Ortega, J. D., Kose, N., Cañas, P., Chao, M.-A., Unnervik, A., Nieto, M., Otaegui, O., Salgado, L. (2020). DMD: A Large-Scale Multi-modal Driver Monitoring Dataset for Attention and Alertness Analysis. In: A. Bartoli & A. Fusiello (eds), Computer Vision — ECCV 2020 Workshops (pg. 387–405). Springer International Publishing.
 ```
 
 ---
