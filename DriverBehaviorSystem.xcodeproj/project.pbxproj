@@ -6,10 +6,6 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		AAEA45BD2F829C1F0028619B /* README.md in Sources */ = {isa = PBXBuildFile; fileRef = AAEA45BC2F829C190028619B /* README.md */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXFileReference section */
 		AAEA44D82F7B1FD90028619B /* DriverBehaviorSystem.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DriverBehaviorSystem.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AAEA458E2F7EE0760028619B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Info.plist; sourceTree = "<group>"; };
@@ -127,7 +123,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AAEA45BD2F829C1F0028619B /* README.md in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

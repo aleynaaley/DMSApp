@@ -12,6 +12,7 @@ class CameraManager: NSObject, ObservableObject {
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "camera.queue", qos: .userInteractive)
     private var faceRequest: VNDetectFaceLandmarksRequest!
+    
 
     var previewLayer: AVCaptureVideoPreviewLayer?
 
@@ -30,7 +31,9 @@ class CameraManager: NSObject, ObservableObject {
             guard let results = req.results as? [VNFaceObservation],
                   let face = results.first,
                   let lm = face.landmarks
-            else { return }
+            else {
+                return
+            }
 
             self?.processFace(face: face, landmarks: lm)
         }
@@ -114,13 +117,19 @@ class CameraManager: NSObject, ObservableObject {
 
     private func mouthAspectRatio(_ pts: [CGPoint]) -> Double {
         guard pts.count >= 12 else { return 0.1 }
-        let top = pts[pts.count / 2]
-        let bottom = pts[0]
-        let left = pts[pts.count / 4]
-        let right = pts[pts.count * 3 / 4]
-        let vert = dist(top, bottom)
-        let horiz = dist(left, right)
-        return vert / (horiz + 1e-7)
+        // Vision outerLips nokta sırası:
+        // 0 = sol köşe, ~n/2 = sağ köşe (yatay)
+        // ~n/4 = üst dudak ortası, ~n*3/4 = alt dudak ortası (dikey)
+        // Ağız açılınca dikey artar → MAR artar (doğru davranış)
+        let n      = pts.count
+        let left   = pts[0]           // sol köşe
+        let right  = pts[n / 2]       // sağ köşe
+        let top    = pts[n / 4]       // üst dudak ortası
+        let bottom = pts[n * 3 / 4]   // alt dudak ortası
+        let horiz  = dist(left, right)
+        let vert   = dist(top, bottom)
+        guard horiz > 1.0 else { return 0.1 }
+        return vert / horiz
     }
 
     private func headPose(face: VNFaceObservation,

@@ -309,6 +309,10 @@ class DrowsinessEngine: ObservableObject {
             if dec.shouldAlert && !s.alertFired { s.fireAlert(level: dec.level) }
             s.objectWillChange.send()
         }
+        // YAW DEBUG — her 30 frame'de bir MAR ve eşiği logla
+        if frameId % 30 == 0 {
+            print("👄 MAR=\(String(format:"%.4f", mar)) baseline.mar=\(String(format:"%.4f", baseline.mar)) eşik=\(String(format:"%.4f", baseline.marYawnThreshold)) isYawning=\(featureBuf.currentIsYawning)")
+        }
         frameId += 1
     }
 
