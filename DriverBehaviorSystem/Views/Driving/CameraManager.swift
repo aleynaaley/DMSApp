@@ -6,19 +6,16 @@ import Combine
 
 class CameraManager: NSObject, ObservableObject {
 
-    var onFrame: ((Double, Double, Double, Double, Double) -> Void)?
+    var onFrame : ((Double, Double, Double, Double, Double) -> Void)?
+    var onNoFace: (() -> Void)?   // yüz bulunamadığında çağrılır
 
     private let session = AVCaptureSession()
-    private let output = AVCaptureVideoDataOutput()
-    private let queue = DispatchQueue(label: "camera.queue", qos: .userInteractive)
+    private let output  = AVCaptureVideoDataOutput()
+    private let queue   = DispatchQueue(label: "camera.queue", qos: .userInteractive)
     private var faceRequest: VNDetectFaceLandmarksRequest!
-    
 
     var previewLayer: AVCaptureVideoPreviewLayer?
-
-    var captureSession: AVCaptureSession {
-        session
-    }
+    var captureSession: AVCaptureSession { session }
 
     override init() {
         super.init()
@@ -27,17 +24,17 @@ class CameraManager: NSObject, ObservableObject {
     }
 
     private func setupFaceRequest() {
-        faceRequest = VNDetectFaceLandmarksRequest { [weak self] req, err in
+        faceRequest = VNDetectFaceLandmarksRequest { [weak self] req, _ in
             guard let results = req.results as? [VNFaceObservation],
-                  let face = results.first,
-                  let lm = face.landmarks
+                  let face    = results.first,
+                  let lm      = face.landmarks
             else {
+                // Yüz bulunamadı — callback
+                self?.onNoFace?()
                 return
             }
-
             self?.processFace(face: face, landmarks: lm)
         }
-
         faceRequest.revision = VNDetectFaceLandmarksRequestRevision3
     }
 
@@ -46,67 +43,48 @@ class CameraManager: NSObject, ObservableObject {
         session.sessionPreset = .hd1280x720
 
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera,
-                                                   for: .video,
-                                                   position: .front),
-              let input = try? AVCaptureDeviceInput(device: device),
+                                                   for: .video, position: .front),
+              let input  = try? AVCaptureDeviceInput(device: device),
               session.canAddInput(input)
-        else {
-            session.commitConfiguration()
-            return
-        }
+        else { session.commitConfiguration(); return }
 
         session.addInput(input)
-
         output.setSampleBufferDelegate(self, queue: queue)
         output.alwaysDiscardsLateVideoFrames = true
-
-        if session.canAddOutput(output) {
-            session.addOutput(output)
-        }
-
+        if session.canAddOutput(output) { session.addOutput(output) }
         output.connections.first?.videoOrientation = .portrait
         session.commitConfiguration()
     }
 
-    func start() {
-        if !session.isRunning {
-            session.startRunning()
-        }
-    }
+    func start() { if !session.isRunning { session.startRunning() } }
+    func stop()  { if  session.isRunning { session.stopRunning()  } }
 
-    func stop() {
-        if session.isRunning {
-            session.stopRunning()
-        }
-    }
-
-    private func processFace(face: VNFaceObservation,
-                             landmarks: VNFaceLandmarks2D) {
+    // MARK: - Yüz İşleme
+    private func processFace(face: VNFaceObservation, landmarks: VNFaceLandmarks2D) {
         let box = face.boundingBox
-        let W = CGFloat(1280)
-        let H = CGFloat(720)
+        let W   = CGFloat(1280)
+        let H   = CGFloat(720)
 
         func pts(_ region: VNFaceLandmarkRegion2D?) -> [CGPoint] {
             guard let r = region else { return [] }
             return r.normalizedPoints.map {
-                CGPoint(
-                    x: $0.x * box.width * W + box.minX * W,
-                    y: $0.y * box.height * H + box.minY * H
-                )
+                CGPoint(x: $0.x * box.width * W + box.minX * W,
+                        y: $0.y * box.height * H + box.minY * H)
             }
         }
 
-        let leftEye = pts(landmarks.leftEye)
+        let leftEye  = pts(landmarks.leftEye)
         let rightEye = pts(landmarks.rightEye)
-        let outerLips = pts(landmarks.outerLips)
+        let outerLip = pts(landmarks.outerLips)
 
         let ear = (eyeAspectRatio(leftEye) + eyeAspectRatio(rightEye)) / 2.0
-        let mar = mouthAspectRatio(outerLips)
+        let mar = mouthAspectRatio(outerLip)
         let (pitch, yaw, roll) = headPose(face: face, W: W, H: H)
 
         onFrame?(ear, mar, pitch, yaw, roll)
     }
 
+    // MARK: - EAR
     private func eyeAspectRatio(_ pts: [CGPoint]) -> Double {
         guard pts.count >= 6 else { return 0.3 }
         let A = dist(pts[1], pts[5])
@@ -115,64 +93,57 @@ class CameraManager: NSObject, ObservableObject {
         return (A + B) / (2.0 * C + 1e-7)
     }
 
+    // MARK: - MAR (düzeltilmiş — ağız açılınca MAR artar)
     private func mouthAspectRatio(_ pts: [CGPoint]) -> Double {
-        guard pts.count >= 12 else { return 0.1 }
-        // Vision outerLips nokta sırası:
-        // 0 = sol köşe, ~n/2 = sağ köşe (yatay)
-        // ~n/4 = üst dudak ortası, ~n*3/4 = alt dudak ortası (dikey)
-        // Ağız açılınca dikey artar → MAR artar (doğru davranış)
+        guard pts.count >= 8 else { return 0.1 }
         let n      = pts.count
-        let left   = pts[0]           // sol köşe
-        let right  = pts[n / 2]       // sağ köşe
-        let top    = pts[n / 4]       // üst dudak ortası
-        let bottom = pts[n * 3 / 4]   // alt dudak ortası
+        let left   = pts[0]          // sol köşe
+        let right  = pts[n / 2]      // sağ köşe
+        let top    = pts[n / 4]      // üst dudak ortası
+        let bottom = pts[n * 3 / 4]  // alt dudak ortası
         let horiz  = dist(left, right)
         let vert   = dist(top, bottom)
         guard horiz > 1.0 else { return 0.1 }
         return vert / horiz
     }
 
-    private func headPose(face: VNFaceObservation,
-                          W: CGFloat, H: CGFloat) -> (Double, Double, Double) {
+    // MARK: - Head Pose
+    private func headPose(face: VNFaceObservation, W: CGFloat, H: CGFloat) -> (Double, Double, Double) {
         let roll = Double(face.roll?.doubleValue ?? 0) * 180.0 / .pi
-        let cx = face.boundingBox.midX - 0.5
-        let cy = face.boundingBox.midY - 0.5
-        let yaw = cx * 60.0
+        let cx   = face.boundingBox.midX - 0.5
+        let cy   = face.boundingBox.midY - 0.5
+        let yaw  = cx * 60.0
         let pitch = cy * 40.0
         return (pitch, yaw, roll)
     }
 
     private func dist(_ a: CGPoint, _ b: CGPoint) -> Double {
-        let dx = a.x - b.x
-        let dy = a.y - b.y
+        let dx = a.x - b.x; let dy = a.y - b.y
         return sqrt(dx * dx + dy * dy)
     }
 }
 
+// MARK: - Sample Buffer Delegate
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        let handler = VNImageRequestHandler(
-            cvPixelBuffer: pixelBuffer,
-            orientation: .leftMirrored,
-            options: [:]
-        )
-
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
+                                            orientation: .leftMirrored, options: [:])
         try? handler.perform([faceRequest])
     }
 }
 
+// MARK: - Camera Preview
 struct CameraPreviewView: UIViewRepresentable {
     let camera: CameraManager
 
     func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
+        let view  = UIView(frame: .zero)
         let layer = AVCaptureVideoPreviewLayer(session: camera.captureSession)
         layer.videoGravity = .resizeAspectFill
-        layer.frame = view.bounds
+        layer.frame        = view.bounds
         view.layer.addSublayer(layer)
         camera.previewLayer = layer
         return view

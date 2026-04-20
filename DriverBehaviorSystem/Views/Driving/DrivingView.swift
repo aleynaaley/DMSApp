@@ -77,6 +77,27 @@ struct DrivingView: View {
                         }
                         .padding(.horizontal, 20)
 
+                        // Sürücü kameradan çıktı banner
+                        if engine.driverMissing {
+                            HStack(spacing: 10) {
+                                Image(systemName: "person.fill.xmark")
+                                    .foregroundColor(.orange)
+                                Text("Sürücü kameradan çıktı")
+                                    .font(.mono(11, weight: .bold))
+                                    .foregroundColor(.orange)
+                                Spacer()
+                                Circle()
+                                    .fill(Color.orange)
+                                    .frame(width: 8, height: 8)
+                            }
+                            .padding(12)
+                            .background(Color.orange.opacity(0.12))
+                            .cornerRadius(10)
+                            .overlay(RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.orange.opacity(0.4), lineWidth: 1))
+                            .padding(.horizontal, 20)
+                        }
+
                         // Fatigue Level Bar
                         FatigueLevelBar(score: engine.smoothedScore,
                                         decision: engine.decision)
@@ -150,8 +171,7 @@ struct DrivingView: View {
                 engine.startCalibration(fps: 30, profileId: profileId)
             }
 
-            // Frame routing: kalibrasyon aşamasında feedCalibFrame,
-            // sonrasında processFrame'e git
+            // Frame routing
             camera.onFrame = { [weak engine] ear, mar, pitch, yaw, roll in
                 guard let engine = engine else { return }
                 if engine.isCalibrating {
@@ -161,6 +181,11 @@ struct DrivingView: View {
                     engine.processFrame(ear: ear, mar: mar,
                                         pitch: pitch, yaw: yaw, roll: roll)
                 }
+            }
+
+            // Yüz yok callback — ses çalmaz, sadece görsel uyarı
+            camera.onNoFace = { [weak engine] in
+                engine?.reportNoFace()
             }
         }
         .onDisappear {
@@ -350,7 +375,9 @@ struct TelemetryCard: View {
             Divider().background(Color.vBorder)
             TelRow(icon: "gauge.with.needle",
                    label: "Model Score",
-                   value: String(format: "%.0f%%", engine.smoothedScore * 100))
+                   value: engine.modelLoaded
+                       ? String(format: "%.0f%%", engine.smoothedScore * 100)
+                       : "⚠️ Model yok")
             Divider().background(Color.vBorder)
             TelRow(icon: "bell",
                    label: "Last Alert",
