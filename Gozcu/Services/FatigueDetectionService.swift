@@ -179,8 +179,10 @@ final class FatigueDetectionService: NSObject, ObservableObject {
         return ((left + right) / 2.0, true)
     }
 
-    // MARK: - Face crop (MediaPipe landmarks)
-    private func extractFaceCrop(from pixelBuffer: CVPixelBuffer, result: FaceLandmarkerResult) -> UIImage? {
+    private let ciContext = CIContext()
+
+    // MARK: - Face crop (MediaPipe landmarks) — v8 eye(üst%60)+mouth(alt%45) birleştirme
+    private func extractFaceCrop(from pixelBuffer: CVPixelBuffer, result: FaceLandmarkerResult) -> CGImage? {
         let allLandmarks = result.faceLandmarks
         guard !allLandmarks.isEmpty else { return nil }
         let landmarks = allLandmarks[0]
@@ -197,23 +199,61 @@ final class FatigueDetectionService: NSObject, ObservableObject {
         let y1 = max(0, minY - dy) * h
         let x2 = min(1, maxX + dx) * w
         let y2 = min(1, maxY + dy) * h
+        guard x2 > x1, y2 > y1 else { return nil }
+
         let rect = CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1)
         let ci = CIImage(cvPixelBuffer: pixelBuffer).cropped(to: rect)
-        let ctx = CIContext()
-        guard let cg = ctx.createCGImage(ci, from: ci.extent) else { return nil }
-        return UIImage(cgImage: cg)
+        guard let faceCrop = ciContext.createCGImage(ci, from: ci.extent) else { return nil }
+        return composeEyeMouth(faceCrop)
     }
 
-    // MARK: - Yawn (CoreML)
-    private func predictYawn(from image: UIImage) -> Double {
-        guard let model = yawnMLModel, let cg = image.cgImage else { return 0 }
+    // v8: eye = üst %60 → (224×134), mouth = alt %45 → (224×90), dikey birleştir = 224×224
+    private func composeEyeMouth(_ face: CGImage) -> CGImage? {
+        let ch = CGFloat(face.height)
+        let cw = CGFloat(face.width)
+
+        let eyeRect   = CGRect(x: 0, y: 0, width: cw, height: ch * 0.60)
+        let mouthRect = CGRect(x: 0, y: ch * 0.55, width: cw, height: ch * 0.45)
+
+        guard let eyeCrop   = face.cropping(to: eyeRect),
+              let mouthCrop = face.cropping(to: mouthRect) else { return nil }
+
+        let size = CGSize(width: 224, height: 224)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: 224, height: 224,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        // CGContext koordinatı alttan başlar → mouth alta (y=0), eye üste (y=90)
+        ctx.draw(mouthCrop, in: CGRect(x: 0, y: 0,   width: 224, height: 90))
+        ctx.draw(eyeCrop,   in: CGRect(x: 0, y: 90,  width: 224, height: 134))
+        return ctx.makeImage()
+    }
+
+    // MARK: - Yawn (CoreML) — ham tensör + softmax
+    private func predictYawn(from cgImage: CGImage) -> Double {
+        guard let model = yawnMLModel else { return 0 }
         var prob = 0.0
         let request = VNCoreMLRequest(model: model) { req, _ in
-            guard let results = req.results as? [VNClassificationObservation] else { return }
-            prob = Double(results.first(where: { $0.identifier == "yawning" })?.confidence ?? 0)
+            // Çıktı ham tensör (TensorType) → VNCoreMLFeatureValueObservation
+            guard let obs = req.results?.first as? VNCoreMLFeatureValueObservation,
+                  let arr = obs.featureValue.multiArrayValue else { return }
+            // 3 sınıf: [awake, microsleep, yawning] → softmax
+            let n = arr.count
+            var logits = [Double](repeating: 0, count: n)
+            for i in 0..<n { logits[i] = arr[i].doubleValue }
+            let maxL = logits.max() ?? 0
+            let exps = logits.map { Foundation.exp($0 - maxL) }
+            let sum  = exps.reduce(0, +)
+            if sum > 0, n >= 3 {
+                prob = exps[2] / sum   // index 2 = yawning
+            }
         }
-        request.imageCropAndScaleOption = .centerCrop
-        try? VNImageRequestHandler(cgImage: cg, orientation: .up).perform([request])
+        request.imageCropAndScaleOption = .scaleFill
+        try? VNImageRequestHandler(cgImage: cgImage, orientation: .up).perform([request])
         return prob
     }
 

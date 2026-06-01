@@ -5,35 +5,28 @@ import Foundation
 // Mimari:
 //   Göz kapanma / PERCLOS / Microsleep → %100 MediaPipe blink_score
 //   Yawning episode                    → %100 SqueezeNet yawn_prob
-//
-// Tüm eşikler literatüre dayalıdır.
 
 final class FatigueEngine {
 
     // MARK: - Literatür tabanlı eşikler
-
-    // Kırpma filtresi: <400ms = normal kırpma (arXiv 2024, 2407.02222)
     static let blinkMaxSec: Double = 0.40
-
-    // Microsleep: 500ms+ hafif (IOVS 2011), 2s+ ciddi (Williamson 2022)
     static let msWarnSec: Double = 0.50
     static let msCritSec: Double = 2.00
-
-    // MediaPipe blendshape göz kapalı eşiği (Lin et al. 2022, Sensors 22(19))
     static let blinkThreshold: Double = 0.35
-
-    // PERCLOS (Abe 2023, SLEEP Advances)
     static let perclosWindowSec: Double = 30.0
-    static let perclosWarn: Double      = 0.15   // %15 → WARNING
-    static let perclosCrit: Double      = 0.30   // %30 → DANGER
+    static let perclosWarn: Double      = 0.15
+    static let perclosCrit: Double      = 0.30
 
-    // Yawning (Vural 2018 IEEE TNSRE, Zhang & Cheng 2020)
+    // Yawning (Vural 2018, ortalama esneme 4s / 6s — Neuromorphic 2023, Wikipedia)
     static let minYawnDurationSec: Double = 2.0
     static let yawnWindowSec: Double      = 300.0
     static let yawnWarn: Int              = 2
     static let yawnCrit: Int              = 3
     static let yawnProbThreshold: Double  = 0.40
-    static let smoothWindowSize: Int      = 5
+    static let smoothWindowSize: Int      = 10   // büyük pencere → anlık 0.00'lar erir
+
+    // Debug yazdırma (test bitince false yap)
+    static let debugYawn: Bool = true
 
     // MARK: - State
     private let fps: Double
@@ -45,6 +38,9 @@ final class FatigueEngine {
     private var yawnEpisodeTimes: [Double] = []
     private var yawnStartTs: Double?
     private var inYawnEpisode: Bool = false
+    private var yawnCounted: Bool = false
+    private var yawnGapFrames: Int = 0
+    private let yawnMaxGapFrames: Int = 30      // ~1s kesintiye tolerans
 
     // İstatistik
     private(set) var dangerFromMP: Int    = 0
@@ -55,7 +51,6 @@ final class FatigueEngine {
     private(set) var dangerFrames: Int    = 0
     private(set) var maxPerclos: Double   = 0
 
-    // Kişisel kalibrasyon eşiği (nil ise global 0.35)
     var personalBlinkThreshold: Double?
 
     init(fps: Double = 30.0) {
@@ -71,6 +66,8 @@ final class FatigueEngine {
         yawnEpisodeTimes.removeAll()
         yawnStartTs = nil
         inYawnEpisode = false
+        yawnCounted = false
+        yawnGapFrames = 0
         dangerFromMP = 0
         dangerFromModel = 0
         frameCount = 0
@@ -80,7 +77,6 @@ final class FatigueEngine {
         maxPerclos = 0
     }
 
-    // MARK: - Result
     struct EngineResult {
         var alertLevel: AlertLevel
         var perclos: Double
@@ -92,7 +88,6 @@ final class FatigueEngine {
         var alertReason: String
     }
 
-    // MARK: - Update (her frame)
     func update(
         yawnProb: Double,
         blinkScore: Double,
@@ -101,10 +96,9 @@ final class FatigueEngine {
     ) -> EngineResult {
 
         frameCount += 1
-
         let threshold = personalBlinkThreshold ?? Self.blinkThreshold
 
-        // 1. Göz kapanma (MediaPipe)
+        // 1. Göz kapanma
         let eyeClosed = faceDetected && blinkScore > threshold
         eyeClosedBuffer.append(eyeClosed ? 1 : 0)
         if eyeClosedBuffer.count > perclosMaxSize { eyeClosedBuffer.removeFirst() }
@@ -116,7 +110,6 @@ final class FatigueEngine {
             consecEyeClosed = 0
             eyeClosedSince = nil
         }
-
         let closedDuration = eyeClosedSince.map { timestamp - $0 } ?? 0
 
         // 2. PERCLOS
@@ -124,39 +117,63 @@ final class FatigueEngine {
             Double(eyeClosedBuffer.reduce(0, +)) / Double(eyeClosedBuffer.count)
         maxPerclos = max(maxPerclos, perclos)
 
-        // 3. Microsleep seviyesi
+        // 3. Microsleep
         let msLevel: Int
-        if closedDuration <= Self.blinkMaxSec      { msLevel = 0 }  // kırpma
-        else if closedDuration <= Self.msWarnSec   { msLevel = 0 }  // sınırda
-        else if closedDuration <= Self.msCritSec   { msLevel = 1 }  // hafif → WARNING
-        else                                       { msLevel = 2 }  // ciddi → DANGER
+        if closedDuration <= Self.blinkMaxSec      { msLevel = 0 }
+        else if closedDuration <= Self.msWarnSec   { msLevel = 0 }
+        else if closedDuration <= Self.msCritSec   { msLevel = 1 }
+        else                                       { msLevel = 2 }
 
-        // 4. Yawning episode (model — majority vote)
+        // 4. Yawning episode
         yawnSmoothBuffer.append(yawnProb)
         if yawnSmoothBuffer.count > Self.smoothWindowSize { yawnSmoothBuffer.removeFirst() }
         let smoothYawn = yawnSmoothBuffer.reduce(0, +) / Double(yawnSmoothBuffer.count)
         let yawnVotes  = yawnSmoothBuffer.filter { $0 > Self.yawnProbThreshold }.count
         let isYawning  = faceDetected && yawnVotes >= 2
 
-        if isYawning && !inYawnEpisode {
-            inYawnEpisode = true
-            yawnStartTs = timestamp
-        } else if !isYawning && inYawnEpisode {
-            let duration = timestamp - (yawnStartTs ?? timestamp)
-            if duration >= Self.minYawnDurationSec {
-                yawnEpisodeTimes.append(yawnStartTs ?? timestamp)
+        if isYawning {
+            yawnGapFrames = 0
+            if !inYawnEpisode {
+                inYawnEpisode = true
+                yawnStartTs = timestamp
+                yawnCounted = false
             }
-            inYawnEpisode = false
-            yawnStartTs = nil
+            let duration = timestamp - (yawnStartTs ?? timestamp)
+            if Self.debugYawn {
+                print(String(format: "😮 ESNIYOR votes=%d/%d yawn=%.2f süre=%.2fs sayıldı=%@ toplam=%d",
+                             yawnVotes, yawnSmoothBuffer.count, yawnProb, duration, yawnCounted ? "E":"H", yawnEpisodeTimes.count))
+            }
+            if duration >= Self.minYawnDurationSec && !yawnCounted {
+                yawnEpisodeTimes.append(yawnStartTs ?? timestamp)
+                yawnCounted = true
+                if Self.debugYawn { print("✅✅✅ ESNEME SAYILDI! toplam=\(yawnEpisodeTimes.count)") }
+            }
+        } else if inYawnEpisode {
+            yawnGapFrames += 1
+            let duration = timestamp - (yawnStartTs ?? timestamp)
+            if Self.debugYawn {
+                print(String(format: "⏸️ kesinti gap=%d/%d yawn=%.2f süre=%.2fs", yawnGapFrames, yawnMaxGapFrames, yawnProb, duration))
+            }
+            if duration >= Self.minYawnDurationSec && !yawnCounted {
+                yawnEpisodeTimes.append(yawnStartTs ?? timestamp)
+                yawnCounted = true
+                if Self.debugYawn { print("✅✅✅ ESNEME SAYILDI (gap'te)! toplam=\(yawnEpisodeTimes.count)") }
+            }
+            if yawnGapFrames > yawnMaxGapFrames {
+                inYawnEpisode = false
+                yawnStartTs = nil
+                yawnCounted = false
+                yawnGapFrames = 0
+                if Self.debugYawn { print("🛑 episode bitti") }
+            }
         }
 
         let cutoff = timestamp - Self.yawnWindowSec
         yawnEpisodeTimes.removeAll { $0 < cutoff }
         let yawnCount = yawnEpisodeTimes.count
 
-        // 5. Alert seviyesi
-        let (alertLevel, reason) = computeAlert(
-            perclos: perclos, msLevel: msLevel, yawnCount: yawnCount)
+        // 5. Alert
+        let (alertLevel, reason) = computeAlert(perclos: perclos, msLevel: msLevel, yawnCount: yawnCount)
 
         // 6. İstatistik
         switch alertLevel {
@@ -170,31 +187,21 @@ final class FatigueEngine {
         }
 
         return EngineResult(
-            alertLevel: alertLevel,
-            perclos: perclos,
-            yawnCount: yawnCount,
-            eyeClosed: eyeClosed,
-            smoothYawn: smoothYawn,
-            msLevel: msLevel,
-            closedDuration: closedDuration,
-            alertReason: reason
-        )
+            alertLevel: alertLevel, perclos: perclos, yawnCount: yawnCount,
+            eyeClosed: eyeClosed, smoothYawn: smoothYawn, msLevel: msLevel,
+            closedDuration: closedDuration, alertReason: reason)
     }
 
-    // MARK: - Alert hesabı (v8 birebir)
     private func computeAlert(perclos: Double, msLevel: Int, yawnCount: Int) -> (AlertLevel, String) {
-        // DANGER
-        if msLevel == 2              { return (.danger, "microsleep_crit") }  // ≥2s (Williamson 2022)
-        if perclos >= Self.perclosCrit { return (.danger, "perclos_crit") }   // ≥%30 (Abe 2023)
-        if yawnCount >= Self.yawnCrit  { return (.danger, "yawn_crit") }       // ≥3 esneme (Vural 2018)
-        // WARNING
-        if msLevel == 1              { return (.warning, "microsleep_warn") }  // 500ms-2s (IOVS 2011)
-        if perclos >= Self.perclosWarn { return (.warning, "perclos_warn") }   // ≥%15 (Abe 2023)
-        if yawnCount >= Self.yawnWarn  { return (.warning, "yawn_warn") }      // ≥2 esneme (Vural 2018)
+        if msLevel == 2              { return (.danger, "microsleep_crit") }
+        if perclos >= Self.perclosCrit { return (.danger, "perclos_crit") }
+        if yawnCount >= Self.yawnCrit  { return (.danger, "yawn_crit") }
+        if msLevel == 1              { return (.warning, "microsleep_warn") }
+        if perclos >= Self.perclosWarn { return (.warning, "perclos_warn") }
+        if yawnCount >= Self.yawnWarn  { return (.warning, "yawn_warn") }
         return (.safe, "normal")
     }
 
-    // MARK: - Özet
     var totalFrames: Int { frameCount }
     var safePercent: Double { frameCount > 0 ? Double(safeFrames) / Double(frameCount) * 100 : 0 }
     var warningPercent: Double { frameCount > 0 ? Double(warningFrames) / Double(frameCount) * 100 : 0 }
