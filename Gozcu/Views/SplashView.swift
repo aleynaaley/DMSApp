@@ -26,7 +26,7 @@ struct SplashView: View {
                     .tracking(8)
                     .opacity(textOpacity)
                 Spacer().frame(height: 12)
-                Text("Yolun gözü kulağı var,\nsenin de Gözcü'n var.")
+                Text("Siz Yola Odaklanın, O Size.")
                     .font(.system(size: 15, design: .rounded))
                     .foregroundColor(Color(hex: "#8BAABF"))
                     .multilineTextAlignment(.center)

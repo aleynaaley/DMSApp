@@ -13,6 +13,7 @@
           "value" : "dark"
         }
       ],
+      "filename" : "AppLogo 2.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -24,6 +25,7 @@
           "value" : "tinted"
         }
       ],
+      "filename" : "AppLogo 3.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"

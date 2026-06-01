@@ -227,12 +227,32 @@ private struct AlarmFlashOverlay: View {
 
 struct CameraPreviewView: UIViewRepresentable {
     let previewLayer: AVCaptureVideoPreviewLayer?
-    func makeUIView(context: Context) -> UIView {
-        let v = UIView(); v.backgroundColor = .black
-        if let l = previewLayer { l.frame = UIScreen.main.bounds; v.layer.addSublayer(l) }
+
+    func makeUIView(context: Context) -> PreviewUIView {
+        let v = PreviewUIView()
+        v.backgroundColor = .black
+        v.previewLayer = previewLayer
         return v
     }
-    func updateUIView(_ v: UIView, context: Context) {
-        if let l = previewLayer { l.frame = v.bounds }
+
+    func updateUIView(_ v: PreviewUIView, context: Context) {
+        v.previewLayer = previewLayer
+    }
+}
+
+final class PreviewUIView: UIView {
+    var previewLayer: AVCaptureVideoPreviewLayer? {
+        didSet {
+            oldValue?.removeFromSuperlayer()
+            if let layer = previewLayer {
+                layer.frame = bounds
+                self.layer.addSublayer(layer)
+            }
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        previewLayer?.frame = bounds
     }
 }
