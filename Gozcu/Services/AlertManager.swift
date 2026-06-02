@@ -13,16 +13,16 @@ final class AlertManager: NSObject, ObservableObject {
 
     @Published private(set) var isAlarmPlaying: Bool = false
 
+    static let debug = true
+
     private enum Phase {
-        case idle              // DANGER yok
-        case waitingToStart    // DANGER, 5sn bekleniyor
-        case alarmPlaying      // alarm çalıyor (5sn)
-        case waitingToRepeat   // alarm bitti, 5sn bekleniyor
+        case idle, waitingToStart, alarmPlaying, waitingToRepeat
     }
     private var phase: Phase = .idle
 
     private var phaseTimer: Timer?
     private var audioPlayer: AVAudioPlayer?
+    private var beepTimer: Timer?   // sistem sesi için tekrar
 
     private let waitBeforeAlarmSec: TimeInterval = 5.0
     private let alarmDurationSec: TimeInterval   = 5.0
@@ -38,27 +38,39 @@ final class AlertManager: NSObject, ObservableObject {
             try AVAudioSession.sharedInstance().setCategory(
                 .playback, mode: .default, options: [.mixWithOthers])
             try AVAudioSession.sharedInstance().setActive(true)
+            if Self.debug { print("🔊 AudioSession aktif") }
         } catch {
-            print("AudioSession hatası: \(error)")
+            print("🔊 AudioSession hatası: \(error)")
         }
         if let url = Bundle.main.url(forResource: "alarm", withExtension: "mp3") {
             audioPlayer = try? AVAudioPlayer(contentsOf: url)
             audioPlayer?.prepareToPlay()
-            audioPlayer?.numberOfLoops = -1  // alarm süresince loop
+            audioPlayer?.numberOfLoops = -1
+            if Self.debug { print("🔊 alarm.mp3 yüklendi") }
+        } else {
+            if Self.debug { print("🔊 alarm.mp3 YOK → sistem sesi kullanılacak") }
         }
     }
 
-    // Her frame'de çağrılır
+    // Her frame'de çağrılır (arka plan thread'inden gelebilir → main'e al)
     func update(alertLevel: AlertLevel) {
-        switch alertLevel {
-        case .safe, .warning:
-            if phase != .idle { resetCycle() }
-        case .danger:
-            if phase == .idle { enterDanger() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            switch alertLevel {
+            case .safe, .warning:
+                if self.phase != .idle {
+                    if Self.debug { print("🔊 DANGER bitti → reset") }
+                    self.resetCycle()
+                }
+            case .danger:
+                if self.phase == .idle {
+                    if Self.debug { print("🔊 DANGER başladı → 5sn bekleniyor") }
+                    self.enterDanger()
+                }
+            }
         }
     }
 
-    // MARK: - Döngü
     private func enterDanger() {
         phase = .waitingToStart
         schedule(after: waitBeforeAlarmSec) { [weak self] in self?.startAlarm() }
@@ -68,6 +80,7 @@ final class AlertManager: NSObject, ObservableObject {
         guard phase == .waitingToStart else { return }
         phase = .alarmPlaying
         isAlarmPlaying = true
+        if Self.debug { print("🔊🔊🔊 ALARM ÇALIYOR") }
         playAlarm()
         schedule(after: alarmDurationSec) { [weak self] in self?.stopAlarmAndWait() }
     }
@@ -76,6 +89,7 @@ final class AlertManager: NSObject, ObservableObject {
         guard phase == .alarmPlaying else { return }
         stopAlarm()
         isAlarmPlaying = false
+        if Self.debug { print("🔊 alarm durdu → 5sn bekle") }
         phase = .waitingToRepeat
         schedule(after: waitBetweenSec) { [weak self] in self?.repeatAlarm() }
     }
@@ -84,6 +98,7 @@ final class AlertManager: NSObject, ObservableObject {
         guard phase == .waitingToRepeat else { return }
         phase = .alarmPlaying
         isAlarmPlaying = true
+        if Self.debug { print("🔊🔊🔊 ALARM TEKRAR") }
         playAlarm()
         schedule(after: alarmDurationSec) { [weak self] in self?.stopAlarmAndWait() }
     }
@@ -98,9 +113,12 @@ final class AlertManager: NSObject, ObservableObject {
 
     private func schedule(after interval: TimeInterval, block: @escaping () -> Void) {
         phaseTimer?.invalidate()
-        phaseTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { _ in
-            DispatchQueue.main.async { block() }
+        // Ana thread + common mode → kamera çalışırken bile timer ateşlenir
+        let timer = Timer(timeInterval: interval, repeats: false) { _ in
+            block()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        phaseTimer = timer
     }
 
     // MARK: - Ses
@@ -109,13 +127,21 @@ final class AlertManager: NSObject, ObservableObject {
             player.currentTime = 0
             player.play()
         } else {
-            // alarm.mp3 yoksa sistem sesi
+            // alarm.mp3 yoksa: 5 saniye boyunca her 0.6sn'de bir sistem sesi çal
+            beepTimer?.invalidate()
             AudioServicesPlaySystemSound(1005)
+            let t = Timer(timeInterval: 0.6, repeats: true) { _ in
+                AudioServicesPlaySystemSound(1005)
+            }
+            RunLoop.main.add(t, forMode: .common)
+            beepTimer = t
         }
     }
 
     private func stopAlarm() {
         audioPlayer?.stop()
+        beepTimer?.invalidate()
+        beepTimer = nil
     }
 
     deinit { resetCycle() }
