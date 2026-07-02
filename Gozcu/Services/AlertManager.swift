@@ -56,6 +56,7 @@ final class AlertManager: NSObject, ObservableObject {
     func update(alertLevel: AlertLevel) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            guard self.isActive else { return }   // sürüş bitti → hiçbir şey yapma
             switch alertLevel {
             case .safe, .warning:
                 if self.phase != .idle {
@@ -68,6 +69,17 @@ final class AlertManager: NSObject, ObservableObject {
                     self.enterDanger()
                 }
             }
+        }
+    }
+
+    // Sürüş aktif mi — false ise update hiçbir şey yapmaz
+    private var isActive: Bool = false
+
+    // Sürüş başlarken çağrılır
+    func start() {
+        DispatchQueue.main.async { [weak self] in
+            self?.isActive = true
+            self?.phase = .idle
         }
     }
 
@@ -109,6 +121,22 @@ final class AlertManager: NSObject, ObservableObject {
         stopAlarm()
         isAlarmPlaying = false
         phase = .idle
+    }
+
+    // Sürüş bitince çağrılır — alarmı kesin durdurur
+    func forceStop() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if Self.debug { print("🔊 forceStop → alarm tamamen durduruldu") }
+            self.isActive = false   // bundan sonra gelen update'leri yok say
+            self.phaseTimer?.invalidate()
+            self.phaseTimer = nil
+            self.beepTimer?.invalidate()
+            self.beepTimer = nil
+            self.audioPlayer?.stop()
+            self.isAlarmPlaying = false
+            self.phase = .idle
+        }
     }
 
     private func schedule(after interval: TimeInterval, block: @escaping () -> Void) {

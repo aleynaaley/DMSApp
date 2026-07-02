@@ -1,10 +1,14 @@
 import Foundation
 
-// MARK: - Fatigue Engine (Python v8'in birebir Swift portu)
+// MARK: - Fatigue Engine
 //
 // Mimari:
-//   Göz kapanma / PERCLOS / Microsleep → %100 MediaPipe blink_score
-//   Yawning episode                    → %100 SqueezeNet yawn_prob
+//   Göz kapanma / PERCLOS / Microsleep → %100 MediaPipe blink_score (anlık tehlike)
+//   Yawning episode                    → %100 SqueezeNet yawn_prob (yorgunluk göstergesi)
+//
+// Esneme DANGER mantığı (tek seferlik bildirim):
+//   3. esneme → DANGER + alarm, ama 15s sonra otomatik WARNING'e düşer.
+//   Microsleep/PERCLOS DANGER ise sürekli kalır (göz kapalı = anlık risk).
 
 final class FatigueEngine {
 
@@ -19,13 +23,15 @@ final class FatigueEngine {
 
     // Yawning (Vural 2018, ortalama esneme 4s / 6s — Neuromorphic 2023, Wikipedia)
     static let minYawnDurationSec: Double = 2.0
-    static let yawnWindowSec: Double      = 300.0
+    static let yawnWindowSec: Double      = 300.0   // esneme sayısı 5 dk pencerede (yorgunluk göstergesi)
     static let yawnWarn: Int              = 2
     static let yawnCrit: Int              = 3
     static let yawnProbThreshold: Double  = 0.40
-    static let smoothWindowSize: Int      = 10   // büyük pencere → anlık 0.00'lar erir
+    static let smoothWindowSize: Int      = 10
 
-    // Debug yazdırma (test bitince false yap)
+    // Esneme DANGER tek seferlik bildirim süresi (1 alarm döngüsü ~15s)
+    static let yawnDangerDurationSec: Double = 15.0
+
     static let debugYawn: Bool = true
 
     // MARK: - State
@@ -40,7 +46,10 @@ final class FatigueEngine {
     private var inYawnEpisode: Bool = false
     private var yawnCounted: Bool = false
     private var yawnGapFrames: Int = 0
-    private let yawnMaxGapFrames: Int = 30      // ~1s kesintiye tolerans
+    private let yawnMaxGapFrames: Int = 30
+
+    // Esneme DANGER tetikleme zamanı (son kez 3. esnemeye ulaşılan an)
+    private var yawnDangerTriggeredTs: Double = -999
 
     // İstatistik
     private(set) var dangerFromMP: Int    = 0
@@ -68,6 +77,7 @@ final class FatigueEngine {
         inYawnEpisode = false
         yawnCounted = false
         yawnGapFrames = 0
+        yawnDangerTriggeredTs = -999
         dangerFromMP = 0
         dangerFromModel = 0
         frameCount = 0
@@ -131,6 +141,8 @@ final class FatigueEngine {
         let yawnVotes  = yawnSmoothBuffer.filter { $0 > Self.yawnProbThreshold }.count
         let isYawning  = faceDetected && yawnVotes >= 2
 
+        let prevYawnCount = yawnEpisodeTimes.count
+
         if isYawning {
             yawnGapFrames = 0
             if !inYawnEpisode {
@@ -139,32 +151,24 @@ final class FatigueEngine {
                 yawnCounted = false
             }
             let duration = timestamp - (yawnStartTs ?? timestamp)
-            if Self.debugYawn {
-                print(String(format: "😮 ESNIYOR votes=%d/%d yawn=%.2f süre=%.2fs sayıldı=%@ toplam=%d",
-                             yawnVotes, yawnSmoothBuffer.count, yawnProb, duration, yawnCounted ? "E":"H", yawnEpisodeTimes.count))
-            }
             if duration >= Self.minYawnDurationSec && !yawnCounted {
                 yawnEpisodeTimes.append(yawnStartTs ?? timestamp)
                 yawnCounted = true
-                if Self.debugYawn { print("✅✅✅ ESNEME SAYILDI! toplam=\(yawnEpisodeTimes.count)") }
+                if Self.debugYawn { print("✅ ESNEME SAYILDI! toplam=\(yawnEpisodeTimes.count)") }
             }
         } else if inYawnEpisode {
             yawnGapFrames += 1
             let duration = timestamp - (yawnStartTs ?? timestamp)
-            if Self.debugYawn {
-                print(String(format: "⏸️ kesinti gap=%d/%d yawn=%.2f süre=%.2fs", yawnGapFrames, yawnMaxGapFrames, yawnProb, duration))
-            }
             if duration >= Self.minYawnDurationSec && !yawnCounted {
                 yawnEpisodeTimes.append(yawnStartTs ?? timestamp)
                 yawnCounted = true
-                if Self.debugYawn { print("✅✅✅ ESNEME SAYILDI (gap'te)! toplam=\(yawnEpisodeTimes.count)") }
+                if Self.debugYawn { print("✅ ESNEME SAYILDI (gap'te)! toplam=\(yawnEpisodeTimes.count)") }
             }
             if yawnGapFrames > yawnMaxGapFrames {
                 inYawnEpisode = false
                 yawnStartTs = nil
                 yawnCounted = false
                 yawnGapFrames = 0
-                if Self.debugYawn { print("🛑 episode bitti") }
             }
         }
 
@@ -172,8 +176,19 @@ final class FatigueEngine {
         yawnEpisodeTimes.removeAll { $0 < cutoff }
         let yawnCount = yawnEpisodeTimes.count
 
+        // Esneme sayısı yeni kritik eşiğe ulaştıysa → DANGER bildirimini tetikle
+        if yawnCount >= Self.yawnCrit && prevYawnCount < yawnCount {
+            yawnDangerTriggeredTs = timestamp
+            if Self.debugYawn { print("🚨 Esneme DANGER tetiklendi (15s bildirim)") }
+        }
+
+        // Esneme DANGER aktif mi? (tetiklemeden bu yana 15s geçmediyse)
+        let yawnDangerActive = (timestamp - yawnDangerTriggeredTs) < Self.yawnDangerDurationSec
+
         // 5. Alert
-        let (alertLevel, reason) = computeAlert(perclos: perclos, msLevel: msLevel, yawnCount: yawnCount)
+        let (alertLevel, reason) = computeAlert(
+            perclos: perclos, msLevel: msLevel,
+            yawnCount: yawnCount, yawnDangerActive: yawnDangerActive)
 
         // 6. İstatistik
         switch alertLevel {
@@ -192,12 +207,17 @@ final class FatigueEngine {
             closedDuration: closedDuration, alertReason: reason)
     }
 
-    private func computeAlert(perclos: Double, msLevel: Int, yawnCount: Int) -> (AlertLevel, String) {
+    private func computeAlert(perclos: Double, msLevel: Int, yawnCount: Int, yawnDangerActive: Bool) -> (AlertLevel, String) {
+        // DANGER — anlık gerçek tehlike (göz kapalı) → sürekli
         if msLevel == 2              { return (.danger, "microsleep_crit") }
         if perclos >= Self.perclosCrit { return (.danger, "perclos_crit") }
-        if yawnCount >= Self.yawnCrit  { return (.danger, "yawn_crit") }
+        // DANGER — esneme: sadece tetiklemeden sonraki 15s içinde (tek seferlik bildirim)
+        if yawnCount >= Self.yawnCrit && yawnDangerActive { return (.danger, "yawn_crit") }
+
+        // WARNING
         if msLevel == 1              { return (.warning, "microsleep_warn") }
         if perclos >= Self.perclosWarn { return (.warning, "perclos_warn") }
+        // Esneme 2+ → WARNING (alarm yok, sadece görsel). 3+ ama 15s geçtiyse de buraya düşer.
         if yawnCount >= Self.yawnWarn  { return (.warning, "yawn_warn") }
         return (.safe, "normal")
     }

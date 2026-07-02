@@ -14,16 +14,16 @@
 		1D09C51FC50B4D476F5DEF8B /* Pods-Gozcu.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Gozcu.release.xcconfig"; path = "Target Support Files/Pods-Gozcu/Pods-Gozcu.release.xcconfig"; sourceTree = "<group>"; };
 		4A22D0DBE0337D426F61FE3F /* Pods-Gozcu.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Gozcu.debug.xcconfig"; path = "Target Support Files/Pods-Gozcu/Pods-Gozcu.debug.xcconfig"; sourceTree = "<group>"; };
 		794D41802BBE5D5D48E807C5 /* Pods_Gozcu.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Gozcu.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		AABEA02A2FCDABDE002F540C /* Gozcu.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gozcu.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AABEA02A2FCDABDE002F540C /* Gözcü.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Gözcü.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		AABEA0552FCDB089002F540C /* Exceptions for "Gozcu" folder in "Gozcu" target */ = {
+		AABEA0552FCDB089002F540C /* Exceptions for "Gozcu" folder in "Gözcü" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = AABEA0292FCDABDE002F540C /* Gozcu */;
+			target = AABEA0292FCDABDE002F540C /* Gözcü */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -31,7 +31,7 @@
 		AABEA02C2FCDABDE002F540C /* Gozcu */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				AABEA0552FCDB089002F540C /* Exceptions for "Gozcu" folder in "Gozcu" target */,
+				AABEA0552FCDB089002F540C /* Exceptions for "Gozcu" folder in "Gözcü" target */,
 			);
 			path = Gozcu;
 			sourceTree = "<group>";
@@ -80,7 +80,7 @@
 		AABEA02B2FCDABDE002F540C /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AABEA02A2FCDABDE002F540C /* Gozcu.app */,
+				AABEA02A2FCDABDE002F540C /* Gözcü.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -88,9 +88,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		AABEA0292FCDABDE002F540C /* Gozcu */ = {
+		AABEA0292FCDABDE002F540C /* Gözcü */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AABEA0352FCDABDF002F540C /* Build configuration list for PBXNativeTarget "Gozcu" */;
+			buildConfigurationList = AABEA0352FCDABDF002F540C /* Build configuration list for PBXNativeTarget "Gözcü" */;
 			buildPhases = (
 				9878CAD7EA3658D15715DB60 /* [CP] Check Pods Manifest.lock */,
 				AABEA0262FCDABDE002F540C /* Sources */,
@@ -104,9 +104,9 @@
 			fileSystemSynchronizedGroups = (
 				AABEA02C2FCDABDE002F540C /* Gozcu */,
 			);
-			name = Gozcu;
+			name = "Gözcü";
 			productName = Gozcu;
-			productReference = AABEA02A2FCDABDE002F540C /* Gozcu.app */;
+			productReference = AABEA02A2FCDABDE002F540C /* Gözcü.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -124,7 +124,7 @@
 					};
 				};
 			};
-			buildConfigurationList = AABEA0252FCDABDE002F540C /* Build configuration list for PBXProject "Gozcu" */;
+			buildConfigurationList = AABEA0252FCDABDE002F540C /* Build configuration list for PBXProject "Gözcü" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -138,7 +138,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				AABEA0292FCDABDE002F540C /* Gozcu */,
+				AABEA0292FCDABDE002F540C /* Gözcü */,
 			);
 		};
 /* End PBXProject section */
@@ -381,7 +381,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AABEA0252FCDABDE002F540C /* Build configuration list for PBXProject "Gozcu" */ = {
+		AABEA0252FCDABDE002F540C /* Build configuration list for PBXProject "Gözcü" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AABEA0332FCDABDF002F540C /* Debug */,
@@ -390,7 +390,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AABEA0352FCDABDF002F540C /* Build configuration list for PBXNativeTarget "Gozcu" */ = {
+		AABEA0352FCDABDF002F540C /* Build configuration list for PBXNativeTarget "Gözcü" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AABEA0362FCDABDF002F540C /* Debug */,

@@ -125,16 +125,18 @@ final class FatigueDetectionService: NSObject, ObservableObject {
         sessionStartTime = Date()
         frameIndex = 0
         lastAlertLevel = .safe
+        alertMgr.start()   // alarm sistemini aktif et
         processingQueue.async { self.captureSession?.startRunning() }
         DispatchQueue.main.async { self.isRunning = true }
     }
 
     func stopDrive() {
         guard isRunning else { return }
+        // Önce alarmı durdur + sürüşü pasif yap (gelen frame'ler işlenmesin)
+        isRunning = false
+        alertMgr.forceStop()
         processingQueue.async { self.captureSession?.stopRunning() }
         DispatchQueue.main.async {
-            self.isRunning = false
-            self.alertMgr.update(alertLevel: .safe)  // alarmı kapat
             self.buildAndDeliverSession()
         }
     }
@@ -230,8 +232,25 @@ final class FatigueDetectionService: NSObject, ObservableObject {
         // CGContext koordinatı alttan başlar → mouth alta (y=0), eye üste (y=90)
         ctx.draw(mouthCrop, in: CGRect(x: 0, y: 0,   width: 224, height: 90))
         ctx.draw(eyeCrop,   in: CGRect(x: 0, y: 90,  width: 224, height: 134))
-        return ctx.makeImage()
+        let composed = ctx.makeImage()
+        
+
+        // DEBUG: ilk birkaç composed görüntüyü kaydet (test sonrası sil)
+        if Self.debugSaveCrop, let img = composed, Self.savedCropCount < 10 {
+            Self.savedCropCount += 1
+            let ui = UIImage(cgImage: img)
+            if let data = ui.jpegData(compressionQuality: 0.9) {
+                let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("crop_\(Self.savedCropCount).jpg")
+                try? data.write(to: url)
+                print("📸 Crop kaydedildi: crop_\(Self.savedCropCount).jpg")
+            }
+        }
+        return composed
     }
+
+    static var debugSaveCrop = true
+    static var savedCropCount = 0
 
     // MARK: - Yawn (CoreML) — ham tensör + softmax
     private func predictYawn(from cgImage: CGImage) -> Double {
